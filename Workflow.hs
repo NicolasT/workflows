@@ -13,7 +13,15 @@ import Actions
 -- a machine being created
 deployMachine :: Job "deployMachine" Template Machine
 deployMachine = defineJob $ \template -> do
-    disk <- runAction createDiskClone template
+    disk <- tryCatch
+            (do
+                disk <- runAction createDiskClone template
+                log "Disk cloned"
+                return disk)
+            (do
+                log "Disk clone failed"
+                stop)
+
     log "Created disk"
     target <- runAction exposeISCSI disk
     machine <- runAction createMachine (template, target)

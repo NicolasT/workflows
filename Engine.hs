@@ -12,6 +12,8 @@ module Engine (
     , action
     , Job, defineJob
     , Workflow, defineWorkflow
+    , stop
+    , tryCatch
     ) where
 
 import Prelude hiding (log)
@@ -48,10 +50,14 @@ type JobID = [Int]
 data Command where
     CRunAction :: (SingI n, Show a) => JobID -> Action n a b -> a -> Command
     CLog :: String -> Command
+    CTryCatch :: JobID -> [Command] -> [Command] -> Command
+    CStop :: Command
 
 instance Show Command where
     show (CRunAction i a b) = "CRunAction " ++ show i ++ " " ++ show (actionName a) ++ " (" ++ show b ++ ")"
     show (CLog s) = "CLog " ++ show s
+    show (CTryCatch is ts cs) = "CTryCatch " ++ show is ++ " (" ++ show ts ++ ") (" ++ show cs ++ ")"
+    show CStop = "CStop"
 
 type ActionTrackerState = ([Command], [Int])
 newtype ActionTracker a = ActionTracker (State ActionTrackerState a)
@@ -88,6 +94,20 @@ runJob job@(Job j) a = do
 
 log :: String -> ActionTracker ()
 log m = modify (\(acts, gen) -> (CLog m : acts, gen))
+
+stop :: ActionTracker a
+stop = modify (\(acts, gen) -> (CStop : acts, gen)) >> return undefined
+
+tryCatch :: Result b => ActionTracker b -> ActionTracker b -> ActionTracker b
+tryCatch (ActionTracker t) (ActionTracker c) = do
+    (acts, is@(h:tis)) <- get
+
+    let (_, (tActs, _)) = runState t ([], 0 : 0 : is)
+        (_, (cActs, _)) = runState c ([], 0 : 1 : is)
+
+    put (CTryCatch is (reverse tActs) (reverse cActs) : acts, (h + 1) : tis)
+
+    return (fromJobResult is)
 
 jobName :: SingI n => Job n a b -> String
 jobName a = withSing (helper a)
